@@ -24,6 +24,7 @@ The caller (the `/career:resume` skill) provides:
 4. **Existing resume** (optional) — raw text of the user's current resume (markdown, plain text, or structured). When provided, the builder **updates** the resume rather than generating from scratch.
 5. **Role context** (optional) — the user's current title, company, and a brief description. Used to frame the professional summary.
 6. **Output preferences** (optional) — `maxBulletsPerProject` (default 5), output format hints.
+7. **Known redaction terms** (optional) — a list of terms the user has already classified as sensitive and configured replacements for in their redactions file. You **do not** need to flag these — the skill will substitute them after you return. Use this list only as a hint for what the user considers internal, which can help calibrate your judgment when flagging *other* terms.
 
 If the date range is missing, return an error — do not guess.
 
@@ -301,6 +302,38 @@ Pull the highest-scored bullets regardless of project or source. Existing resume
 **7e. Other sections** (with baseline only).
 If the existing resume contains sections not covered above (Education, Certifications, Publications, etc.), pass them through unchanged in the output. Do not drop, reorder, or modify sections you don't have new data for.
 
+### 7f. Flag potentially sensitive terms
+
+Scan every user-facing text field in the structured output (`professionalSummary`, all `experience[].bullets[].text`, `keyAchievements[].text`, `supersededBullets[].original`/`replacement`) for terms that *look* like internal codenames, product names, or confidential identifiers. **Do not substitute** — that is the skill's job. Your job is to surface candidates so the user can review them in a single interactive gate.
+
+**What to flag (high signal):**
+- Capitalized multi-word phrases that aren't standard English or well-known public products: `Project Phoenix`, `Operation Zenith`, `Atlas v2`.
+- Kebab-case or snake_case identifiers that look product-y rather than tech-y: `onecloud-prod`, `customer_portal_v3`, `k2-cluster`. (Tech-y means recognized framework/library/tool names — `next-js`, `react-router`, `kafka-connect` should NOT be flagged.)
+- Internal acronyms not on the standard tech list: `OCP`, `ICE`, `RTX-pipeline`. (Standard: `AWS`, `GCP`, `CI/CD`, `API`, `SQL`, etc.)
+- Customer/client names appearing as proper nouns when they aren't widely known public references.
+
+**What NOT to flag:**
+- Anything in the **Known redaction terms** list passed via input — the skill will handle those silently.
+- Public open-source projects, frameworks, languages, cloud providers, and common tooling. Use the same allowlist sense the `journal-analyzer` uses for `techStack`.
+- The user's own company name when it appears in role context (already public via the existing resume).
+- Generic English nouns even if capitalized at the start of a bullet.
+
+**For each flagged term, record:**
+```json
+{
+  "term": "Project Phoenix",
+  "examples": [
+    { "field": "experience[2].bullets[0]", "preview": "Migrated Project Phoenix from monolith to..." }
+  ],
+  "confidence": "high | medium | low",
+  "reason": "capitalized multi-word phrase, no public match"
+}
+```
+
+Cap `examples` at 3 per term — the user just needs context, not every occurrence.
+
+**Bias toward flagging.** A false positive (user says "that's actually public") is mildly annoying. A false negative (a codename ships into a resume sent to a recruiter) is a real harm. When unsure, flag with `confidence: low` and let the user decide.
+
 ### 8. Emit structured output
 
 Return a single fenced JSON block:
@@ -374,6 +407,16 @@ Return a single fenced JSON block:
       "reason": "Journal-derived version includes specific performance numbers"
     }
   ],
+  "flaggedSensitiveTerms": [
+    {
+      "term": "Project Phoenix",
+      "examples": [
+        { "field": "experience[2].bullets[0]", "preview": "Migrated Project Phoenix from monolith…" }
+      ],
+      "confidence": "high",
+      "reason": "capitalized multi-word phrase, no public match"
+    }
+  ],
   "jdAnalysis": {
     "coveredRequirements": ["React", "TypeScript", "CI/CD"],
     "uncoveredRequirements": ["Kubernetes", "GraphQL"],
@@ -393,6 +436,7 @@ Return a single fenced JSON block:
 
 The `jdAnalysis` block is only present when a JD was provided. Omit it entirely otherwise.
 The `passthroughSections` and `supersededBullets` blocks are only present when an existing resume was provided. Omit them entirely otherwise.
+The `flaggedSensitiveTerms` array is always present — emit `[]` (not omit) when no terms were flagged, so the skill doesn't have to defend against a missing key.
 When no existing resume is provided, omit `title` and `company` from experience entries (unless inferred from role context), and set all `isNew` to `true`.
 
 ## Proxy metric reference
@@ -422,7 +466,7 @@ When truly no metric exists, quantify the *what*: "5 REST endpoints," "3 databas
   - **Turns 1–10** — load journals, parse existing resume + JD, build corpus (steps 1, 1b, 2). Batch frontmatter extraction in a single `python3 -c` call rather than per-file Reads.
   - **Turns 11–20** — cluster (step 3). Compute file-overlap Jaccard via one `python3 -c` call rather than pairwise in-context.
   - **Turns 21–30** — elevate, score, tailor to JD (steps 4–6). Generate bullets in batches per project, not one round per bullet.
-  - **Turns 31–40** — structure into sections (step 7).
+  - **Turns 31–40** — structure into sections (step 7), then scan for sensitive terms (step 7f).
   - **Turns 41–45** — emit final JSON (step 8) with margin for one error-recovery cycle.
 
   **Workload reduction for large ranges.** When the date range exceeds 60 days *or* the corpus exceeds 100 accomplishments, shed work rather than rationing turns:
@@ -438,4 +482,5 @@ When truly no metric exists, quantify the *what*: "5 REST endpoints," "3 databas
   - **Preserve structure.** Match the existing resume's section order, formatting, and conventions. Don't impose a different template.
   - **Pass through unchanged sections.** Education, certifications, publications, and other sections you have no new data for should appear in `passthroughSections` verbatim.
   - **Merge, don't replace.** The goal is an updated resume, not a new one. The user invested effort in their existing resume — respect that.
+- **Never substitute redaction terms yourself.** Substitution is the skill's job — it runs deterministically over your output and is re-runnable when the user updates the redactions file. Your job is to *flag* candidates in `flaggedSensitiveTerms`. Bullets you emit should retain the original wording from the journal corpus, modulo the elevation/clustering transformations.
 - **The output is a draft.** Make this clear in your response. The user should review, edit, and personalize before using it on an actual resume.

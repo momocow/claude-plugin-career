@@ -206,7 +206,8 @@ The resume pipeline is a **read-only consumer** of the journal pipeline's output
 5. **XYZ elevation**: Each cluster is transformed using Google's XYZ formula ("Accomplished [X] as measured by [Y], by doing [Z]"). Falls back to CAR (Challenge-Action-Result) when metrics are unavailable.
 6. **Scoring**: Each bullet is scored 1-5 using the "So What?" test — does a hiring manager care?
 7. **JD tailoring** (optional): If `--jd` is provided, bullets are scored against the job description, ranked by relevance, and terminology mismatches are flagged. Coverage gaps are identified.
-8. Output is written to `<resumes_dir>/` (default: sibling of journals; configurable via `resumes:` in `~/.career/config`).
+8. **Redaction pass**: known sensitive terms from `~/.career/redactions.yaml` are substituted with vague replacements; suspicious-looking unconfigured terms (codenames, internal product names) trigger an interactive review gate. See [Redactions](#redactions) below.
+9. Output is written to `<resumes_dir>/` (default: sibling of journals; configurable via `resumes:` in `~/.career/config`).
 
 ### Why the resume-builder reads `.user.md`
 
@@ -225,6 +226,41 @@ The resume draft contains:
 - **JD Analysis** (if JD provided) — covered/uncovered requirements, terminology suggestions
 
 Each elevated bullet links back to the original daily bullets it was derived from, so you can verify and edit.
+
+### Redactions
+
+Internal codenames, private project names, and confidential identifiers from your daily work shouldn't leak into a resume that ends up in a recruiter's inbox. The resume pipeline handles this in two layers:
+
+**1. Configured redactions (deterministic).** `~/.career/redactions.yaml` lists terms and their vague replacements:
+
+```yaml
+redactions:
+  - term: "Project Phoenix"
+    replacement: "an internal authentication platform"
+  - term: "atlas-v2"
+    replacement: "a customer data platform"
+```
+
+`/career:resume` substitutes these case-insensitively across all user-facing bullets before writing the output. Substitution skips `derivedFrom` provenance — that stays verbatim so you can still trace bullets back to original journal text. Override the file location with `--redactions <path>`.
+
+**2. Flagged-for-review (interactive).** The `resume-builder` agent also scans the bullets for terms that *look* internal but aren't in your redactions file — capitalized multi-word phrases, kebab-case product-y identifiers, internal-sounding acronyms. When any are found, the skill stops before writing and asks:
+
+```
+Found N potentially sensitive term(s) not in your redactions file:
+  1. "Project Atlas"  — in: "Migrated Project Atlas from monolith…"
+  2. "OneCloud"        — in: "Built OneCloud auth flow…"
+
+  [a] Add replacements now    [e] Edit redactions.yaml yourself
+  [s] Skip (write as-is)      [c] Cancel
+```
+
+`[a]` prompts for a replacement per term and appends to your redactions file. `[e]` lets you edit the file in another window and continue. `[s]` writes the draft anyway, but adds a frontmatter `sensitiveTermsWarning` field and a visible "⚠️ Review before sharing" block at the top of the markdown — so the warning is in the file itself, not just terminal output that scrolls away.
+
+**Why a separate file (not inline in `~/.career/config`)?** The redaction list itself is sensitive — it's literally an inventory of internal names. A separate file makes it easier to manage independently, gitignore selectively, or swap when changing employers.
+
+**Why the pipeline flags rather than auto-redacts.** Pure substitution misses things you forgot to add. Pure auto-redaction false-positives on legitimate public names ("React", "Postgres"). Flagging hits the middle: aggressive enough to catch leaks, conservative enough to not mangle bullets.
+
+**The journals are never modified.** Redaction is a one-way pass on resume output only. Your journals remain accurate ground truth.
 
 ## Idempotency
 
@@ -247,6 +283,7 @@ You own when your journal history gets recorded.
 - Accomplishment text is authored once by the analyzer and flows through unchanged during journal aggregation. The resume-builder may elevate bullets using XYZ formula but always preserves the originals as `derivedFrom`.
 - The resume-builder **reads `.user.md` files** (it's a terminal consumer, no feedback loop) but **never writes to journal files**.
 - Resume output goes to `<resumes_dir>/` (default: sibling of journals), separate from daily journals so drafts don't churn inside a versioned journals git repo.
+- The resume-builder **flags but never substitutes** sensitive terms — substitution is deterministic and runs in the skill, so it's re-runnable when the user updates the redactions file. Substitution applies only to user-facing bullets, never to `derivedFrom` provenance.
 
 ## Troubleshooting
 

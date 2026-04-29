@@ -13,6 +13,7 @@ Bootstrap the configuration the `journal-orchestrator` and `journal-analyzer` ag
 - `~/.career/config` — YAML config telling the agents where to write journals and resumes.
 - `<journals_dir>/` — the directory journals will be written into. Default: `~/.career/journals/`.
 - `<resumes_dir>/` — the directory `/career:resume` writes resume drafts into. Default: sibling of journals (e.g., `~/.career/resumes/` when journals is `~/.career/journals/`). Kept separate so resume drafts don't churn inside a versioned journals git repo.
+- `~/.career/redactions.yaml` — empty stub (with explanatory comments) where the user lists internal/sensitive terms (codenames, project names) and their vague replacements. Read by `/career:resume` to scrub the output. Lives outside the journals dir on purpose: the list itself is sensitive and shouldn't be casually committed alongside journals.
 - **Path-specific permissions** in `~/.claude/settings.json` — so subagents can read/write the journals directory, resume output directory, and session data without interactive prompts (critical for background agents).
 
 ## Procedure
@@ -62,7 +63,30 @@ Bootstrap the configuration the `journal-orchestrator` and `journal-analyzer` ag
 
    Use the canonical path (with `~` if the user wants it portable across machines, or absolute if they prefer explicit). If the resumes path is the sibling default, still write it explicitly so the config is self-documenting.
 
-7. **Write path-specific permissions to `~/.claude/settings.json`.**
+7. **Scaffold `~/.career/redactions.yaml`** if it doesn't already exist.
+
+   - If the file exists, leave it alone.
+   - If not, write this template:
+     ```yaml
+     # Sensitive terms to scrub from /career:resume output.
+     # Each entry: a term that appears in your journals (codename, internal product, etc.)
+     # and the vague replacement to use in resume drafts.
+     #
+     # Match is case-insensitive on whole words. Substitution applies only to user-facing
+     # bullets in the resume — never to the journal files themselves.
+     #
+     # Example:
+     # redactions:
+     #   - term: "Project Phoenix"
+     #     replacement: "an internal authentication platform"
+     #   - term: "atlas-v2"
+     #     replacement: "a customer data platform"
+
+     redactions: []
+     ```
+   - Do **not** ask the user to populate it now. The first `/career:resume` run will surface flagged terms and offer interactive options to add entries.
+
+8. **Write path-specific permissions to `~/.claude/settings.json`.**
 
    The plugin ships portable tool permissions (e.g., `Bash(python3 *)`) via its own `settings.json`. But path-specific rules depend on where the user chose to store journals and resumes, so they must be written at init time.
 
@@ -73,16 +97,18 @@ Bootstrap the configuration the `journal-orchestrator` and `journal-analyzer` ag
      - `Read(<resumes_dir_absolute>/*)`
      - `Write(<resumes_dir_absolute>/*)`
      - `Read(<home>/.career/*)`
+     - `Write(<home>/.career/redactions.yaml)`
      - `Read(<home>/.claude/projects/**)`
    - Merge into `sandbox.filesystem.allowWrite` (append, skip duplicates):
      - `<journals_dir_absolute>`
      - `<resumes_dir_absolute>`
+     - `<home>/.career/redactions.yaml`
    - Write the merged file back. Validate JSON before writing.
-   - Report what was added (e.g., "Added 4 permission rules and 2 sandbox paths to ~/.claude/settings.json").
+   - Report what was added (e.g., "Added 5 permission rules and 3 sandbox paths to ~/.claude/settings.json").
 
-   **Why this step exists:** background subagents cannot prompt for permission interactively. Without pre-approved path rules, the orchestrator and analyzer agents will fail silently when running in background. The plugin's `settings.json` handles tool-level permissions (portable); this step handles path-level permissions (user-specific).
+   **Why this step exists:** background subagents cannot prompt for permission interactively. Without pre-approved path rules, the orchestrator and analyzer agents will fail silently when running in background. The plugin's `settings.json` handles tool-level permissions (portable); this step handles path-level permissions (user-specific). The `Write(redactions.yaml)` rule is needed because the `[a] Add replacements now` path in `/career:resume` appends to the file.
 
-8. **Offer to set up daily journal generation.**
+9. **Offer to set up daily journal generation.**
    - The AI journal is most useful when it runs automatically at the end of each day.
    - **Important:** `/schedule` creates *remote* agents in Anthropic's cloud. Remote agents **cannot** access local session JSONL files (`~/.claude/projects/`), so `/schedule` will not work for journal generation. The journal pipeline must run locally.
    - Ask: "Want to set up a daily cron job to run `/career:journal yesterday` each morning? [y/N]"
@@ -96,14 +122,15 @@ Bootstrap the configuration the `journal-orchestrator` and `journal-analyzer` ag
      - Do **not** run `crontab` for them — show the line and let them add it.
    - If no or unclear, skip silently. The user can always set this up later.
 
-9. **Report back** with:
-   - Config file path
-   - Journals directory path
-   - Resumes directory path (and whether it's the sibling default)
-   - Whether git was initialized in the journals directory
-   - Permissions added to `~/.claude/settings.json` (count and summary)
-   - Whether the user opted to set up a cron (and if so, the exact line to add)
-   - The next step: e.g., "Run `/career:journal` to generate today's AI journal, or `/career:user-journal` to start a personal entry."
+10. **Report back** with:
+    - Config file path
+    - Journals directory path
+    - Resumes directory path (and whether it's the sibling default)
+    - Redactions file path (and whether it was newly scaffolded or already existed)
+    - Whether git was initialized in the journals directory
+    - Permissions added to `~/.claude/settings.json` (count and summary)
+    - Whether the user opted to set up a cron (and if so, the exact line to add)
+    - The next step: e.g., "Run `/career:journal` to generate today's AI journal, or `/career:user-journal` to start a personal entry."
 
 ## Constraints
 
