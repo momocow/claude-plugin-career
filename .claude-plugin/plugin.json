@@ -1,6 +1,6 @@
 {
   "name": "career",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Turn Claude Code sessions into a searchable, resume-ready journal with automated resume/CV generation",
   "author": {
     "name": "MomoCow",

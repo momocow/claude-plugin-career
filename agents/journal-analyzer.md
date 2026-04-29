@@ -71,14 +71,16 @@ The `message` field on `user`/`assistant` records carries the full Anthropic mes
 
 6. **Extract accomplishments** in resume-bullet form. One accomplishment per discrete, citable outcome. Be honest — if a session was inconclusive, it has zero accomplishments. Each accomplishment carries the categories it touches.
 
-7. **Enrich each accomplishment with resume signals.** Steps 7a–7f produce optional fields. Populate them when session data supports it; **omit rather than hallucinate**. These fields power the downstream `resume-builder` agent's clustering, scoring, and XYZ-formula elevation.
+7. **Enrich each accomplishment with resume signals.** Steps 7a–7f produce additional fields that power the downstream `resume-builder` agent's clustering, scoring, and XYZ-formula elevation. Two classes:
+   - **REQUIRED (deterministic)** — `scope.filesChanged`, `qualityTier`, and `techStack` (when `filesTouched` is non-empty). These are derivable from data the analyzer already has; emit them on every accomplishment. Falling back to a defensible default (e.g., `qualityTier: medium`) is preferred over omission.
+   - **OPTIONAL (inferential)** — `context`, `impact`, `starComponents`, and the optional sub-fields of `scope` (`servicesAffected`, `endpointsBuilt`). Populate when session data supports it; **omit rather than hallucinate**.
 
    **7a. Tech stack inference.**
    Infer technologies used from three sources:
    - **File extensions** in `filesTouched`: `.tsx`/`.jsx` → `react`, `.ts` → `typescript`, `.py` → `python`, `.go` → `go`, `.rs` → `rust`, `.tf` → `terraform`, `.vue` → `vue`, `.svelte` → `svelte`, `Dockerfile` → `docker`, `.prisma` → `prisma`, `.graphql`/`.gql` → `graphql`, files under `.github/workflows/` → `github-actions`.
    - **Commands run**: `pnpm`/`npm`/`yarn` → `node-js`, `cargo` → `rust`, `pip`/`poetry` → `python`, `go build`/`go test` → `go`, `docker build`/`docker compose` → `docker`, `terraform` → `terraform`, `kubectl` → `kubernetes`.
    - **Categories already assigned** (these often name the tech directly).
-   Emit as `techStack` array on each accomplishment. Use kebab-case slug convention matching the category style.
+   Emit as `techStack` array on each accomplishment. Use kebab-case slug convention matching the category style. **Required** when `filesTouched` is non-empty; emit `[]` only if no tech can be inferred from any of the three sources.
 
    **7b. Context extraction.**
    For each accomplishment, look for the *why* behind the work:
@@ -93,15 +95,17 @@ The `message` field on `user`/`assistant` records carries the full Anthropic mes
 
    **7c. Scope indicators.**
    Count observable scope:
-   - `scope.filesChanged` — count of distinct files in `filesTouched` (always available).
+   - `scope.filesChanged` — count of distinct files in `filesTouched`. **Required** — this is `len(filesTouched)`, always derivable. Emit `0` for accomplishments with no file evidence.
    - `scope.servicesAffected` — count of distinct top-level directories in a monorepo (e.g., `apps/web/`, `apps/api/` = 2 services), or distinct repos if the session references multiple. Omit if the project is not a monorepo.
    - `scope.endpointsBuilt` — count of API route/controller files among `filesTouched`. Omit if not applicable.
 
    **7d. Quality tier assessment.**
-   Classify each accomplishment into one of three tiers:
+   **Required.** Classify each accomplishment into one of three tiers:
    - **`high`** — New user-facing features shipped; performance improvements with observable effect; system architecture or design decisions; production incident resolution; new APIs with multiple endpoints; security or concurrency mechanisms.
    - **`medium`** — Refactoring with clear structural improvement; test coverage additions; CI/CD pipeline work; tooling/DX improvements; build system changes; library upgrades with migration effort.
    - **`low`** — Routine config changes; minor dependency bumps; narrow-scope bug fixes with no broader impact; documentation-only changes; file renames or formatting.
+
+   When the evidence is genuinely ambiguous between two tiers, default to `medium`. Skipping the field is not allowed — `medium` with mixed signals is more useful to the resume-builder than absence.
 
    **7e. STAR component extraction.**
    For **high** and **medium** tier accomplishments, attempt to decompose into STAR:
@@ -121,6 +125,8 @@ The `message` field on `user`/`assistant` records carries the full Anthropic mes
    - `impact.metric` — a candidate sentence describing the measurable outcome (e.g., "Reduced build time from 45s to 12s").
    - `impact.type` — one of: `performance`, `reliability`, `velocity`, `scale`, `quality`, `scope`, `cost`.
    Omit the entire `impact` object if no quantifiable or qualitative signal is found.
+
+   **Completeness check.** Before emitting an accomplishment, verify the three required fields are present: `qualityTier` (`high`/`medium`/`low`), `techStack` (an array — possibly empty), and `scope.filesChanged` (an integer — possibly `0`). Optional fields are populated as the data permits.
 
 8. **Enrich evidence with git commits.** If the project `cwd` exists locally and is a git repo:
    - Run `git -C <cwd> log --since=<start> --until=<end> --pretty=format:'%H%x09%cI%x09%s'` to find commits inside the time range.
@@ -214,7 +220,9 @@ Emit a single fenced JSON block. Keep it compact — the orchestrator will aggre
 
 The `projectSummary.activities`, `accomplishments`, and `categories` are the union/flattening of the per-session arrays (deduped). The orchestrator relies on this. `projectSummary.techStack` is the union of all per-accomplishment `techStack` arrays (deduped, sorted).
 
-**Enrichment fields note:** The fields `qualityTier`, `techStack`, `scope`, `context`, `impact`, and `starComponents` on accomplishments support the downstream `resume-builder` agent. They are all optional. Populate them when session data supports it; omit rather than hallucinate.
+**Enrichment fields note:** The fields `qualityTier`, `techStack`, `scope`, `context`, `impact`, and `starComponents` on accomplishments support the downstream `resume-builder` agent. Two classes (see step 7):
+- **Required:** `qualityTier` (default `medium` when ambiguous), `techStack` (when `filesTouched` is non-empty — emit `[]` if nothing inferable), `scope.filesChanged` (always — `len(filesTouched)`).
+- **Optional:** `context`, `impact`, `starComponents`, and `scope.servicesAffected` / `scope.endpointsBuilt` — populate when session data supports it; omit rather than hallucinate.
 
 `projectSummary.newCategories` lists slugs in `categories` that were **not** in the `knownCategories` input — i.e., slugs you minted. This lets the orchestrator surface drift for the user to review.
 
