@@ -109,7 +109,7 @@ The `message` field on `user`/`assistant` records carries the full Anthropic mes
    - **Task** — What needed to be done? (from the user's request or the identified problem)
    - **Action** — What was specifically done? (from tool calls, file edits, commands executed)
    - **Result** — What was the outcome? (from commit messages, test results, task completion language)
-   Emit under `starComponents`. If any single component cannot be extracted with reasonable confidence, **omit the entire `starComponents` object** rather than filling gaps with speculation. The resume-builder can still work without it.
+   Emit under `starComponents`. **Emit whichever components can be extracted with reasonable confidence; omit individual fields that can't, rather than the entire object.** The resume-builder treats each component independently (situation/task → context for [Z], action → [Z], result → [X] in the XYZ formula), so partial STAR provides strictly more signal than no STAR. Never fill gaps with speculation — an absent field is fine; a fabricated one is not. If you cannot extract *any* component confidently, omit the entire `starComponents` object.
 
    **7f. Impact signal extraction.**
    Scan session text (user prompts, assistant responses, tool results) for:
@@ -122,7 +122,7 @@ The `message` field on `user`/`assistant` records carries the full Anthropic mes
    - `impact.type` — one of: `performance`, `reliability`, `velocity`, `scale`, `quality`, `scope`, `cost`.
    Omit the entire `impact` object if no quantifiable or qualitative signal is found.
 
-8. **Enrich evidence with git commits.** (Step numbering note: steps 7a–7f above are sub-steps of step 7.) If the project `cwd` exists locally and is a git repo:
+8. **Enrich evidence with git commits.** If the project `cwd` exists locally and is a git repo:
    - Run `git -C <cwd> log --since=<start> --until=<end> --pretty=format:'%H%x09%cI%x09%s'` to find commits inside the time range.
    - For each commit, optionally run `git -C <cwd> show --stat <sha>` (or `--name-only`) to get the touched files — useful for matching commits to accomplishments.
    - Match commits to sessions by timestamp proximity and by overlap between commit-touched files and session-touched files.
@@ -131,13 +131,14 @@ The `message` field on `user`/`assistant` records carries the full Anthropic mes
 
    **Why this matters:** commits are the strongest, most attributable evidence for resume bullets. They survive file moves, cover work done outside Claude, and let resume-gen quote real artifacts.
 
-8. **Derive categories** as kebab-case slugs, with **soft consistency**:
+9. **Derive categories** as kebab-case slugs, with **soft consistency**:
    - **Strongly prefer** any slug from the `knownCategories` input that fits the work. Reuse beats invention.
    - Only mint a new slug when none of the known ones fits. When you do, follow these conventions:
      - **Tech / framework**: `react`, `next-js`, `tailwind`, `postgres`, `aws-lambda`, `terraform`
      - **Domain / concern**: `auth`, `payments`, `observability`, `ci-cd`, `data-pipeline`, `accessibility`
      - **Language**: `typescript`, `python`, `go` — only when language itself is a relevant signal
-     - Prefer **specific over generic**: `react-hooks` beats `frontend`; `jwt` beats `security`.
+     - Prefer **specific topics over generic parents** when minting a *new* slug: `jwt` beats `security`; `data-pipeline` beats `backend`. The minted slug should name the topic directly, not a vague umbrella.
+     - **Do not fragment within an existing parent.** If a slug in `knownCategories` already covers the work, reuse it rather than minting a narrower sibling. Example: `react` is already known → use `react`, do not mint `react-hooks`. The orchestrator will collapse such sub-topic mints back to the existing slug for consistency, so minting them is wasted work.
      - Prefer **stable terms over project nicknames**: do not invent `acme-billing-thing`.
    - In the output, the orchestrator will see which slugs were reused vs newly minted by diffing against `knownCategories` — be deliberate.
 

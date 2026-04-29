@@ -61,7 +61,7 @@ In this plugin, `YYYY-MM-DD.md` is **AI-owned** and regenerated on every `journa
    <!-- Anything else worth remembering — context resume-gen might find useful later. -->
    ```
 
-   Write atomically (`.tmp` then rename).
+   Use the `Write` tool directly — no `.tmp` + rename dance.
 
 6. **Report back** with:
    - The file path

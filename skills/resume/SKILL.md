@@ -152,7 +152,7 @@ At minimum, a date range must be provided. Everything else is optional.
 
    **If `--format json`:** Write the agent's JSON output directly.
 
-   Write atomically (`.tmp` then rename).
+   Use the `Write` tool directly — no `.tmp` + rename dance.
 
 8. **Report back** to the user:
    - Output file path

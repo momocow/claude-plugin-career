@@ -22,13 +22,16 @@ Parse the user's time-range argument, then delegate to the `journal-orchestrator
 
 1. **Parse the argument.**
    - If none, treat as `today`.
-   - Resolve `today`/`yesterday` using the system local date.
+   - **Resolve the timezone first** using this chain (highest precedence first):
+     1. `timezone:` field in `~/.career/config` (a YAML key, optional). Read with a `Bash` one-liner — `python3 -c "import yaml,os; print(yaml.safe_load(open(os.path.expanduser('~/.career/config'))).get('timezone',''))"` — and trim whitespace.
+     2. The system's local timezone (e.g., from `$TZ` or the OS — whatever Python's `datetime.now().astimezone()` resolves to).
+   - Resolve `today`/`yesterday` against that timezone — not against UTC, and not against any container's environment timezone.
    - Reject future dates, inverted ranges (`end < start`), and malformed input — ask the user to retry rather than guessing.
 
 2. **Compute start/end as ISO-8601 timestamps.**
-   - Single date → `[YYYY-MM-DDT00:00:00<local-offset>, YYYY-MM-DDT23:59:59<local-offset>]`
-   - Range → `[start-date T00:00:00, end-date T23:59:59]` in local time
-   - Convert to UTC for the orchestrator (it expects UTC).
+   - Single date → `[YYYY-MM-DDT00:00:00<resolved-offset>, YYYY-MM-DDT23:59:59<resolved-offset>]` using the timezone resolved in step 1.
+   - Range → `[start-date T00:00:00, end-date T23:59:59]` in that timezone.
+   - Convert to UTC before passing to the orchestrator — the orchestrator operates on UTC and does not re-read `timezone:` itself.
 
 3. **Invoke `journal-orchestrator`** via the Agent tool with a prompt containing:
    - The computed `start` and `end` ISO-8601 timestamps
