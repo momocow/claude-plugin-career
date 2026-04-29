@@ -69,10 +69,13 @@ When scanning the journals directory (e.g., for `knownCategories` in step 1), **
 
 - List `~/.claude/projects/*/` with `Glob`.
 - For each project directory, do a fast `Bash` check: does any `.jsonl` contain a `user` or `assistant` record whose `timestamp` falls in the range? Use a streaming Python one-liner — do **not** `Read` the JSONL files into context.
+- **This existence check is the only permitted JSONL touch in the orchestrator.** It returns a boolean per project — nothing else. Do not extract message text, file paths, commit hashes, categories, accomplishments, or any other content from the JSONL here or elsewhere in your own context, whether via `Bash`, `Read`, `Grep`, `Glob`, or any other tool. All content extraction is delegated to `journal-analyzer` in step 3 (see Constraints).
 - Keep the directories that pass the check. Apply the optional project filter if provided.
 - **Sort the surviving list by encoded directory name, ascending.** This is the batching order used in step 3 — stable sort means the same project set always produces the same wave assignments, which in turn makes cross-wave category learning deterministic across runs.
 
 ### 3. Fan out to journal-analyzer (batched, wave-based)
+
+**Hard precondition: every project that survives step 2 must be analyzed by a `journal-analyzer` subagent invoked via the `Agent` tool — no exceptions.** There is no inline-extraction fallback. If you find yourself writing a `Bash`/`python3` script to pull message text, file paths, commits, or categories out of JSONL, **stop** — that work belongs inside `journal-analyzer`, which has its own context window and is the only component allowed to author enrichment fields (`starComponents`, `qualityTier`, `scope`, `context`, `impact`). Bypassing it for any reason — context budget, turn budget, "it's faster", or otherwise — produces a journal that fails its contract with the downstream `resume-builder`. If the project count is too high to delegate, raise it via the `maxAnalyzers` warn-and-confirm gate below; do not silently substitute inline parsing.
 
 Naive fan-out doesn't scale. With N projects, holding N raw analyzer responses in context while you compose the final journal can exhaust the window, and the cost scales linearly. Apply batch control:
 
@@ -276,6 +279,7 @@ Return a status block to the caller containing:
 
 - Output file path and whether it was a fresh write or an idempotent merge
 - Counts: projects analyzed, sessions covered, accomplishments emitted (and how many were new vs. deduped)
+- **`analyzersInvoked`** — the literal count of `journal-analyzer` `Agent` calls you issued in step 3. This must equal `projectsCount + len(skippedProjects)` (every surviving project triggers exactly one analyzer call, succeed or fail). If `analyzersInvoked` is `0` while `projectsCount` is `> 0`, the run is invalid — you bypassed the analyzer and the journal will be missing enrichment fields. Surface this as a prominent error in the status block, do not present the run as successful, and recommend re-running.
 - Projects skipped (with reasons): malformed output, turn-budget exceeded, etc.
 - Wave count and batch size actually used (helpful when diagnosing slow runs)
 - **Category review summary** from step 5: replacements made (`from → to`) and slugs approved as new
@@ -285,7 +289,7 @@ Return a status block to the caller containing:
 
 ## Constraints
 
-- **Never read JSONL files directly** into your context — always delegate per-project parsing to `journal-analyzer`.
+- **Never read JSONL content into your own context** — by any means. This includes `Read`, `Bash` (`cat`/`head`/`grep`/`jq`/`python3 -c "...print(...)"`), `Grep`, and any other tool. The only permitted JSONL operation in the orchestrator is the boolean existence check in step 2 (does any record fall in range, yes or no). All content extraction — message text, accomplishments, file paths, commits, categories, enrichment fields — must happen inside a `journal-analyzer` subagent invocation (`Agent` tool). The analyzer has its own context window and is the only component authorized to author the structured signal the resume-builder consumes. **There is no "save tokens by extracting it myself" shortcut** — bypassing the analyzer drops the inferential enrichment fields (`starComponents`, `qualityTier`, `scope`, `context`, `impact`) and silently breaks the downstream resume contract.
 - **Do not duplicate or rewrite** the analyzer's accomplishment text. Resume-gen depends on stable, attributable bullets — paraphrasing breaks that.
 - **Do not invent themes that aren't supported** by the actual accomplishments. Themes are observations, not aspirations.
 - **Frontmatter is the source of truth.** If the body and frontmatter disagree, downstream tools will trust the frontmatter — keep them in sync.
