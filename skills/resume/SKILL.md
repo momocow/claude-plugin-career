@@ -19,6 +19,7 @@ Parse the user's arguments, then delegate to the `resume-builder` subagent. This
 | `--company "Company"` | Current company name |
 | `--max-bullets <N>` | Max bullets per project section (default 5) |
 | `--format markdown\|json` | Output format (default: `markdown`) |
+| `--out <path>` | Custom output path. Absolute paths are used as-is; bare filenames or relative paths resolve under `<resumes_dir>`. Defaults to `<start>--<end>.md` (or `.json` for `--format json`). |
 
 At minimum, a date range must be provided. Everything else is optional.
 
@@ -67,9 +68,14 @@ At minimum, a date range must be provided. Everything else is optional.
 
 7. **Format and write the output.**
 
-   Resolve the output path: `<resumes_dir>/<start>--<end>.md` (or `.json` if `--format json`), where `<resumes_dir>` came from step 2.
-   - Create `<resumes_dir>` if it doesn't exist.
-   - If the file already exists, ask the user: "A resume for this range already exists at `<path>`. Overwrite? [y/N]"
+   Resolve the output path:
+   - If `--out` was provided:
+     - Absolute path (starts with `/` or `~`) → use as-is (expand `~`).
+     - Bare filename or relative path → resolve under `<resumes_dir>` (e.g., `--out my-draft.md` → `<resumes_dir>/my-draft.md`).
+     - Do **not** auto-append an extension — respect what the user typed. If the extension and `--format` disagree (e.g., `--out foo.json --format markdown`), warn but proceed.
+   - Otherwise: `<resumes_dir>/<start>--<end>.md` (or `.json` if `--format json`), where `<resumes_dir>` came from step 2.
+   - Create the parent directory if it doesn't exist.
+   - If the file already exists, ask the user: "A resume already exists at `<path>`. Overwrite? [y/N]"
 
    **If `--format markdown` (default):** Transform the agent's JSON output into a human-readable Markdown document:
 

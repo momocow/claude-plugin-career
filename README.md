@@ -9,7 +9,7 @@ A Claude Code plugin that turns your Claude session history into a searchable, r
 | `/career:init`                       | One-time setup: config file, journals directory, optional git repo    |
 | `/career:journal [date\|range]`      | Generate or regenerate the AI daily journal (delegates to orchestrator) |
 | `/career:user-journal [date]`        | Scaffold a personal, user-authored journal entry                       |
-| `/career:resume range [--resume path] [--jd path]` | Generate or update resume content from journals, optionally from an existing resume and/or tailored to a JD |
+| `/career:resume range [--resume path] [--jd path] [--out path]` | Generate or update resume content from journals, optionally from an existing resume and/or tailored to a JD; `--out` overrides the default output filename |
 
 Plus three subagents the model calls on your behalf:
 
