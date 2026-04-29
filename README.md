@@ -49,7 +49,7 @@ Claude sessions (~/.claude/projects/)
 └─────────────────────────────┘
          │
          ▼
-   <journals_dir>/resumes/<range>.md   ← Resume draft output
+   <resumes_dir>/<range>.md            ← Resume draft output (default sibling of journals)
 ```
 
 ### File ownership
@@ -89,13 +89,14 @@ This design exists because **background subagents cannot prompt for permission i
 
 ```yaml
 journals: ~/.career/journals/   # where journal files are written
+resumes:  ~/.career/resumes/    # where /career:resume writes drafts (default: sibling of journals)
 # timezone: Asia/Taipei          # for resolving "today" / "yesterday"
 # categoryLookbackDays: 30       # how far back to scan for knownCategories
 # analyzerBatchSize: 5           # max analyzers per wave (hard-capped at 10)
 # maxAnalyzers: 30               # warn-and-confirm threshold for big fan-outs
 ```
 
-Only `journals:` is required. Everything else has sensible defaults.
+Only `journals:` is required. `resumes:` defaults to the sibling of `journals:` (so `~/.career/journals/` → `~/.career/resumes/`). The split keeps resume drafts — which churn frequently and may be JD-tailored — out of a versioned journals git repo.
 
 ## How scaling works
 
@@ -205,7 +206,7 @@ The resume pipeline is a **read-only consumer** of the journal pipeline's output
 5. **XYZ elevation**: Each cluster is transformed using Google's XYZ formula ("Accomplished [X] as measured by [Y], by doing [Z]"). Falls back to CAR (Challenge-Action-Result) when metrics are unavailable.
 6. **Scoring**: Each bullet is scored 1-5 using the "So What?" test — does a hiring manager care?
 7. **JD tailoring** (optional): If `--jd` is provided, bullets are scored against the job description, ranked by relevance, and terminology mismatches are flagged. Coverage gaps are identified.
-8. Output is written to `<journals_dir>/resumes/`.
+8. Output is written to `<resumes_dir>/` (default: sibling of journals; configurable via `resumes:` in `~/.career/config`).
 
 ### Why the resume-builder reads `.user.md`
 
@@ -245,7 +246,7 @@ You own when your journal history gets recorded.
 - The analyzer **never reads whole JSONL files into context** — it streams via `Bash + python3`.
 - Accomplishment text is authored once by the analyzer and flows through unchanged during journal aggregation. The resume-builder may elevate bullets using XYZ formula but always preserves the originals as `derivedFrom`.
 - The resume-builder **reads `.user.md` files** (it's a terminal consumer, no feedback loop) but **never writes to journal files**.
-- Resume output goes to `<journals_dir>/resumes/`, separate from daily journals.
+- Resume output goes to `<resumes_dir>/` (default: sibling of journals), separate from daily journals so drafts don't churn inside a versioned journals git repo.
 
 ## Troubleshooting
 

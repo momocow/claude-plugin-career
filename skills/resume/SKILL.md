@@ -35,10 +35,11 @@ At minimum, a date range must be provided. Everything else is optional.
      - `this-quarter` — first of the current quarter through today
    - Reject future end-dates. Reject inverted ranges (`end < start`).
 
-2. **Read `~/.career/config`** to get the journals directory.
+2. **Read `~/.career/config`** to get the journals and resumes directories.
    - Expand `~` to the user's home directory.
-   - If `~/.career/config` is missing, fall back to `~/.career/journals/` and warn the user that `/career:init` hasn't been run yet.
-   - Verify the journals directory exists.
+   - If `~/.career/config` is missing, fall back to `~/.career/journals/` and `~/.career/resumes/` and warn the user that `/career:init` hasn't been run yet.
+   - If `journals` is set but `resumes` is missing, default `resumes` to the sibling of journals (e.g., `~/.career/resumes/` when journals is `~/.career/journals/`). Compute as `<parent of journals_dir>/resumes/`.
+   - Verify the journals directory exists. The resumes directory will be created on first write if absent.
 
 3. **Load the existing resume** (if `--resume` was provided).
    - If `--resume` points to a file path, read it.
@@ -66,8 +67,8 @@ At minimum, a date range must be provided. Everything else is optional.
 
 7. **Format and write the output.**
 
-   Resolve the output path: `<journals_dir>/resumes/<start>--<end>.md` (or `.json` if `--format json`).
-   - Create the `resumes/` subdirectory if it doesn't exist.
+   Resolve the output path: `<resumes_dir>/<start>--<end>.md` (or `.json` if `--format json`), where `<resumes_dir>` came from step 2.
+   - Create `<resumes_dir>` if it doesn't exist.
    - If the file already exists, ask the user: "A resume for this range already exists at `<path>`. Overwrite? [y/N]"
 
    **If `--format markdown` (default):** Transform the agent's JSON output into a human-readable Markdown document:
