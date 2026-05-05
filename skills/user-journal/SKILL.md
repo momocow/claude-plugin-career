@@ -10,7 +10,7 @@ Scaffold a `YYYY-MM-DD.user.md` file so the user can record reflections, correct
 
 ## Why two files?
 
-In this plugin, `YYYY-MM-DD.md` is **AI-owned** and regenerated on every `journal-orchestrator` run — any manual edits to it are lost. `YYYY-MM-DD.user.md` is **user-owned** and the AI (orchestrator, analyzer) will never read or modify it. Downstream tools like resume-gen may consume both files as a pair.
+In this plugin, `YYYY-MM-DD.md` is **AI-owned** and regenerated on every `/career:journal` run — any manual edits to it are lost. `YYYY-MM-DD.user.md` is **user-owned** and the AI (the journal skill, the analyzer subagent) will never read or modify it. Downstream tools like resume-gen may consume both files as a pair.
 
 ## Procedure
 

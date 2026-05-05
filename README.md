@@ -1,21 +1,22 @@
 # career
 
-A Claude Code plugin that turns your Claude session history into a searchable, resume-ready journal — and then generates polished resume content from those journals. Three subagents read your session transcripts and git commits across every project you've worked on, classify the work, and emit daily journals with structured frontmatter. A fourth agent consumes those journals to produce clustered, XYZ-formula resume bullets tailored to specific job descriptions.
+A Claude Code plugin that turns your Claude session history into a searchable, resume-ready journal — and then generates polished resume content from those journals. The `/career:journal` skill orchestrates per-project `journal-analyzer` subagents that read your session transcripts and git commits across every project you've worked on, classify the work, and emit daily journals with structured frontmatter. A separate `resume-builder` subagent consumes those journals to produce clustered, XYZ-formula resume bullets tailored to specific job descriptions.
 
 ## What you get
 
 | Command                              | Purpose                                                               |
 | ------------------------------------ | --------------------------------------------------------------------- |
 | `/career:init`                       | One-time setup: config file, journals directory, optional git repo    |
-| `/career:journal [date\|range]`      | Generate or regenerate the AI daily journal (delegates to orchestrator) |
+| `/career:journal [date\|range]`      | Generate or regenerate the AI daily journal; ranges produce one file per day |
 | `/career:user-journal [date]`        | Scaffold a personal, user-authored journal entry                       |
 | `/career:resume range [--resume path] [--jd path] [--out path]` | Generate or update resume content from journals, optionally from an existing resume and/or tailored to a JD; `--out` overrides the default output filename |
 
-Plus three subagents the model calls on your behalf:
+Plus two subagents the journal and resume skills call on your behalf:
 
-- **`journal-orchestrator`** — discovers active projects, fans out to analyzers in deterministic batched waves, normalizes category slugs, and writes an idempotent daily journal
-- **`journal-analyzer`** — per-project: reads the project's Claude session JSONL, enriches with `git log`, and emits structured accomplishments with resume signals (STAR components, tech stack, impact metrics, quality tiers)
-- **`resume-builder`** — reads journals over a date range, clusters related accomplishments across days, elevates with XYZ formula, scores for quality, and structures into resume sections with optional JD tailoring
+- **`journal-analyzer`** — per-project: reads the project's Claude session JSONL, enriches with `git log`, and emits structured accomplishments with resume signals (STAR components, tech stack, impact metrics, quality tiers). Invoked in batched parallel waves by the `/career:journal` skill.
+- **`resume-builder`** — reads journals over a date range, clusters related accomplishments across days, elevates with XYZ formula, scores for quality, and structures into resume sections with optional JD tailoring.
+
+The `/career:journal` skill itself is the orchestrator — discovery, fan-out batching, category normalization, and idempotent merge all run inline in the main conversation. (Claude Code subagents cannot themselves spawn subagents, so the orchestrator must live in a skill, not an agent.)
 
 ## Mental model
 
@@ -24,8 +25,8 @@ Claude sessions (~/.claude/projects/)
          │
          ▼
 ┌─────────────────────────────┐
-│  journal-orchestrator        │  invokes, per project, in waves
-│  (discovery, batching,       │
+│  /career:journal skill       │  invokes, per project, in waves
+│  (discovery, batching,       │  (runs in main conversation)
 │   category review, merge)    │
 └─────────────────────────────┘
          │  fan-out
@@ -56,7 +57,7 @@ Claude sessions (~/.claude/projects/)
 
 | File                 | Owner   | Who writes it                                          | AI reads it? |
 | -------------------- | ------- | ------------------------------------------------------ | ------------ |
-| `YYYY-MM-DD.md`      | AI      | `journal-orchestrator` (via `/career:journal`)         | Yes — regenerates in full on each run |
+| `YYYY-MM-DD.md`      | AI      | The `/career:journal` skill                            | Yes — regenerates in full on each run |
 | `YYYY-MM-DD.user.md` | User    | You (scaffold via `/career:user-journal`, edit freely) | **No — strictly off-limits** |
 
 This separation exists because the AI regenerates the `.md` side completely on every run. Trying to keep manual edits in there fights the tool; putting them in `.user.md` removes the conflict entirely. Downstream tools (resume-gen) consume both files as a pair.
@@ -79,7 +80,7 @@ Permissions are split into three layers to balance portability with security:
 | --- | --- | --- | --- |
 | **Plugin** | `plugins/career/settings.json` | Tool-level permissions (e.g., `Bash(python3 *)`, `Bash(git log *)`) — portable across machines | Plugin install |
 | **Init** | `~/.claude/settings.json` | Path-specific permissions (e.g., `Write(<journals_dir>/*)`, sandbox allowWrite) — user-specific | `/career:init` |
-| **Agent** | `agents/*.md` frontmatter `tools:` | Tool restrictions per agent (analyzer: `Read,Glob,Grep,Bash`; orchestrator: `Agent,Read,Write,Glob,Bash`) | Agent start |
+| **Agent** | `agents/*.md` frontmatter `tools:` | Tool restrictions per agent (analyzer: `Read,Glob,Grep,Bash`; resume-builder: `Read,Glob,Grep,Bash`) | Agent start |
 
 This design exists because **background subagents cannot prompt for permission interactively.** Without pre-approved rules, background agents fail silently. The plugin ships what it can portably; `/career:init` fills in the paths that depend on user config.
 
@@ -100,22 +101,23 @@ Only `journals:` is required. `resumes:` defaults to the sibling of `journals:` 
 
 ## How scaling works
 
-The orchestrator batches analyzers to keep its own context flat and costs predictable:
+The `/career:journal` skill batches analyzers to keep its own context flat and costs predictable:
 
 - **Projects are sorted deterministically** (by encoded dir name) before batching — same input always produces same waves.
 - **Default batch size: 5 in parallel**, hard-capped at 10 regardless of config.
 - **Between waves**: each wave's outputs are folded into a running aggregate and then dropped from context. Raw analyzer responses do not accumulate.
-- **Above 30 candidate projects**: orchestrator stops and asks you to narrow scope. Raise `maxAnalyzers` in config if 30 is too tight.
+- **Above 30 candidate projects**: the skill stops and asks you to narrow scope. Raise `maxAnalyzers` in config if 30 is too tight.
 - **Per-analyzer turn budget: 20.** A pathological analyzer is skipped with reason `exceeded turn budget`; it doesn't retry.
 - **Cross-wave category learning**: wave 2+ sees slugs minted in wave 1, reducing drift within a single run.
+- **Ranges run serially per day**: a `YYYY-MM-DD..YYYY-MM-DD` range processes each calendar date in order; later days see categories minted on earlier days, which keeps slug drift low across the range.
 
 ## Category soft-consistency
 
-To keep slugs reusable across days (essential for downstream resume-gen grouping), the orchestrator:
+To keep slugs reusable across days (essential for downstream resume-gen grouping), the `/career:journal` skill:
 
 1. Loads `knownCategories` from the frontmatter of the last 30 AI journals before fan-out (`.user.md` files are ignored).
 2. Passes that list to every analyzer. The analyzer strongly prefers known slugs; it only mints new ones when no existing slug fits.
-3. **Reviews minted slugs before aggregating.** If a new slug (e.g., `json-web-tokens`) is a reasonable substitute for an existing one (`jwt`), the orchestrator rewrites it across that analyzer's output. Replacements surface in the status block.
+3. **Reviews minted slugs before aggregating.** If a new slug (e.g., `json-web-tokens`) is a reasonable substitute for an existing one (`jwt`), the skill rewrites it across that analyzer's output. Replacements surface in the status block.
 4. Surfaces any genuinely new slugs under `newCategories:` in the frontmatter so you can audit drift.
 
 ## Activity taxonomy (fixed)
@@ -211,7 +213,7 @@ The resume pipeline is a **read-only consumer** of the journal pipeline's output
 
 ### Why the resume-builder reads `.user.md`
 
-The orchestrator never reads `.user.md` to prevent feedback loops in journal generation. The resume-builder does read them because:
+The `/career:journal` skill never reads `.user.md` to prevent feedback loops in journal generation. The resume-builder does read them because:
 - It's a terminal consumer — no feedback loop risk.
 - User corrections to AI-generated bullets should be honored.
 - Off-screen accomplishments (meetings, mentoring, PR reviews) belong on a resume.
@@ -264,11 +266,11 @@ Found N potentially sensitive term(s) not in your redactions file:
 
 ## Idempotency
 
-Running `/career:journal` twice for the same date is safe. The orchestrator reads the existing file, deduplicates accomplishments by `(project, text)` exact match, merges evidence additively, and regenerates the body from the merged frontmatter. Counts are recomputed from merged data, not summed.
+Running `/career:journal` twice for the same date is safe. The skill reads the existing file, deduplicates accomplishments by `(project, text)` exact match, merges evidence additively, and regenerates the body from the merged frontmatter. Counts are recomputed from merged data, not summed.
 
 ## Git repo (journals directory)
 
-If the journals directory is a git repo, the orchestrator:
+If the journals directory is a git repo, the `/career:journal` skill:
 
 - Writes and regenerates `.md` files as normal
 - **Does not** run `git add`, `commit`, `push`, or any other git state change
@@ -278,7 +280,7 @@ You own when your journal history gets recorded.
 
 ## Constraints & guarantees
 
-- The orchestrator **never reads `.user.md` files** and **never modifies git state** in the journals repo.
+- The `/career:journal` skill **never reads `.user.md` files** and **never modifies git state** in the journals repo.
 - The analyzer **never reads whole JSONL files into context** — it streams via `Bash + python3`.
 - Accomplishment text is authored once by the analyzer and flows through unchanged during journal aggregation. The resume-builder may elevate bullets using XYZ formula but always preserves the originals as `derivedFrom`.
 - The resume-builder **reads `.user.md` files** (it's a terminal consumer, no feedback loop) but **never writes to journal files**.
@@ -287,6 +289,6 @@ You own when your journal history gets recorded.
 
 ## Troubleshooting
 
-- **"Project count exceeds maxAnalyzers"** — the orchestrator is refusing to fan out to too many projects. Narrow the range, pass a project filter, or raise `maxAnalyzers` in config.
+- **"Project count exceeds maxAnalyzers"** — the `/career:journal` skill is refusing to fan out to too many projects. Narrow the range, pass a project filter, or raise `maxAnalyzers` in config.
 - **A project shows up as skipped with reason `exceeded turn budget`** — the analyzer ran out of its 20-turn budget. Usually means the project has an unusual amount of session data in range. Consider analyzing that project in isolation with a shorter range.
-- **Categories are drifting** — check the `newCategories:` field on recent journals. Either the work genuinely covers new territory, or you can hand-edit the frontmatter to collapse synonyms before the next run; the orchestrator will pick up your fix on the next run's `knownCategories` load.
+- **Categories are drifting** — check the `newCategories:` field on recent journals. Either the work genuinely covers new territory, or you can hand-edit the frontmatter to collapse synonyms before the next run; the `/career:journal` skill will pick up your fix on the next run's `knownCategories` load.

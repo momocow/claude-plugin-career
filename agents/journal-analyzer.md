@@ -16,12 +16,12 @@ The downstream consumer is a **resume / CV generator**, so:
 
 ## Inputs (passed via the prompt)
 
-The orchestrator will provide:
+You are invoked by the `/career:journal` skill, which runs in the main conversation. (Claude Code subagents cannot spawn other subagents, so the caller is necessarily a skill, not an agent.) The caller will provide:
 
 1. **Project identifier** — either a canonical `cwd` (e.g. `/Users/foo/Workspace/bar`) or the encoded directory name (e.g. `-Users-foo-Workspace-bar`).
 2. **Time range** — `start` and `end` ISO-8601 timestamps (UTC). If only a date is given, treat as `[YYYY-MM-DDT00:00:00Z, YYYY-MM-DDT23:59:59Z]`.
 3. **Known categories** — a list of category slugs already in use across prior journals. **Prefer these slugs when classifying** to keep the registry stable; only mint a new slug when no existing one is a reasonable fit. (Soft-consistency contract — see "Categories" below.)
-4. **Optional output requirements** — schema/format hints from the orchestrator. If absent, use the default schema below.
+4. **Optional output requirements** — schema/format hints from the caller. If absent, use the default schema below.
 
 If anything required is missing, return an error object instead of guessing.
 
@@ -144,13 +144,13 @@ The `message` field on `user`/`assistant` records carries the full Anthropic mes
      - **Domain / concern**: `auth`, `payments`, `observability`, `ci-cd`, `data-pipeline`, `accessibility`
      - **Language**: `typescript`, `python`, `go` — only when language itself is a relevant signal
      - Prefer **specific topics over generic parents** when minting a *new* slug: `jwt` beats `security`; `data-pipeline` beats `backend`. The minted slug should name the topic directly, not a vague umbrella.
-     - **Do not fragment within an existing parent.** If a slug in `knownCategories` already covers the work, reuse it rather than minting a narrower sibling. Example: `react` is already known → use `react`, do not mint `react-hooks`. The orchestrator will collapse such sub-topic mints back to the existing slug for consistency, so minting them is wasted work.
+     - **Do not fragment within an existing parent.** If a slug in `knownCategories` already covers the work, reuse it rather than minting a narrower sibling. Example: `react` is already known → use `react`, do not mint `react-hooks`. The caller will collapse such sub-topic mints back to the existing slug for consistency, so minting them is wasted work.
      - Prefer **stable terms over project nicknames**: do not invent `acme-billing-thing`.
-   - In the output, the orchestrator will see which slugs were reused vs newly minted by diffing against `knownCategories` — be deliberate.
+   - In the output, the caller will see which slugs were reused vs newly minted by diffing against `knownCategories` — be deliberate.
 
 ## Default output schema
 
-Emit a single fenced JSON block. Keep it compact — the orchestrator will aggregate many of these.
+Emit a single fenced JSON block. Keep it compact — the caller will aggregate many of these.
 
 ```json
 {
@@ -218,18 +218,19 @@ Emit a single fenced JSON block. Keep it compact — the orchestrator will aggre
 }
 ```
 
-The `projectSummary.activities`, `accomplishments`, and `categories` are the union/flattening of the per-session arrays (deduped). The orchestrator relies on this. `projectSummary.techStack` is the union of all per-accomplishment `techStack` arrays (deduped, sorted).
+The `projectSummary.activities`, `accomplishments`, and `categories` are the union/flattening of the per-session arrays (deduped). The caller relies on this. `projectSummary.techStack` is the union of all per-accomplishment `techStack` arrays (deduped, sorted).
 
 **Enrichment fields note:** The fields `qualityTier`, `techStack`, `scope`, `context`, `impact`, and `starComponents` on accomplishments support the downstream `resume-builder` agent. Two classes (see step 7):
 - **Required:** `qualityTier` (default `medium` when ambiguous), `techStack` (when `filesTouched` is non-empty — emit `[]` if nothing inferable), `scope.filesChanged` (always — `len(filesTouched)`).
 - **Optional:** `context`, `impact`, `starComponents`, and `scope.servicesAffected` / `scope.endpointsBuilt` — populate when session data supports it; omit rather than hallucinate.
 
-`projectSummary.newCategories` lists slugs in `categories` that were **not** in the `knownCategories` input — i.e., slugs you minted. This lets the orchestrator surface drift for the user to review.
+`projectSummary.newCategories` lists slugs in `categories` that were **not** in the `knownCategories` input — i.e., slugs you minted. This lets the caller surface drift for the user to review.
 
-If the orchestrator passed an alternative output schema, follow that instead.
+If the caller passed an alternative output schema, follow that instead.
 
 ## Constraints
 
+- **You are the sole JSONL content extractor.** The calling skill performs only a boolean per-project existence check (does any record fall in range, yes/no) and delegates all content extraction — message text, tool calls, file paths, commits, accomplishments, categories, enrichment fields — to you. If the analyzer ever stops doing this work, the structured signal the resume-builder depends on disappears. Don't push extraction back up to the caller; that's the architectural role this agent fills.
 - **Don't dump raw transcripts** into your output — summarize.
 - **Don't hallucinate sessions, files, or accomplishments.** If a session was exploratory and produced no concrete outcome, give it activities (e.g. `research`) but an empty `accomplishments` array. False resume bullets are worse than missing ones.
 - **Resume-bullet quality bar:** if you cannot point to a file, command, or commit as evidence, it is not an accomplishment.
@@ -237,4 +238,4 @@ If the orchestrator passed an alternative output schema, follow that instead.
 - **Be efficient with context.** Prefer streaming JSONL via `Bash` + `python3 -c '...'` to extract just the fields you need rather than `Read`-ing whole files.
 - **Sidechain traffic** (`isSidechain: true`) is subagent activity — count it but don't double-count its work in the parent session's summary.
 - **Empty range is valid output.** If no sessions fall in the time range, return the object with `sessionsCount: 0` and empty arrays — do not error.
-- **Budget discipline.** You have 20 turns (set via `maxTurns` in frontmatter). The orchestrator treats turn-budget exhaustion as a skip, not a retry. Plan your work: one streaming `Bash` call to filter JSONL, one `Bash` call for git enrichment, then synthesize. Don't exploratorily `Read` files you don't need. If a project has 50 sessions in range, summarize aggressively — quality of the `projectSummary` matters more than per-session fidelity.
+- **Budget discipline.** You have 20 turns (set via `maxTurns` in frontmatter). The caller treats turn-budget exhaustion as a skip, not a retry. Plan your work: one streaming `Bash` call to filter JSONL, one `Bash` call for git enrichment, then synthesize. Don't exploratorily `Read` files you don't need. If a project has 50 sessions in range, summarize aggressively — quality of the `projectSummary` matters more than per-session fidelity.

@@ -1,12 +1,12 @@
 ---
 name: init
-description: Bootstrap the ~/.career configuration and journals directory used by the journal-orchestrator and journal-analyzer agents. Run this once before generating your first journal.
+description: Bootstrap the ~/.career configuration and journals directory used by the /career:journal skill and the journal-analyzer subagent. Run this once before generating your first journal.
 user-invocable: true
 ---
 
 # Career — initialize
 
-Bootstrap the configuration the `journal-orchestrator` and `journal-analyzer` agents depend on. Idempotent — safe to re-run; nothing existing is overwritten without explicit consent.
+Bootstrap the configuration the `/career:journal` skill and the `journal-analyzer` subagent depend on. Idempotent — safe to re-run; nothing existing is overwritten without explicit consent.
 
 ## What this creates
 
@@ -56,7 +56,7 @@ Bootstrap the configuration the `journal-orchestrator` and `journal-analyzer` ag
    ```yaml
    journals: <chosen journals path>
    resumes:  <chosen resumes path>
-   # Optional fields the orchestrator will honor when present:
+   # Optional fields the /career:journal skill will honor when present:
    # timezone: Asia/Taipei
    # categoryLookbackDays: 30
    ```
@@ -106,7 +106,7 @@ Bootstrap the configuration the `journal-orchestrator` and `journal-analyzer` ag
    - Write the merged file back. Validate JSON before writing.
    - Report what was added (e.g., "Added 5 permission rules and 3 sandbox paths to ~/.claude/settings.json").
 
-   **Why this step exists:** background subagents cannot prompt for permission interactively. Without pre-approved path rules, the orchestrator and analyzer agents will fail silently when running in background. The plugin's `settings.json` handles tool-level permissions (portable); this step handles path-level permissions (user-specific). The `Write(redactions.yaml)` rule is needed because the `[a] Add replacements now` path in `/career:resume` appends to the file.
+   **Why this step exists:** background subagents cannot prompt for permission interactively. Without pre-approved path rules, the `journal-analyzer` subagent will fail silently when running in background, and the `/career:journal` skill won't be able to write the journal file. The plugin's `settings.json` handles tool-level permissions (portable); this step handles path-level permissions (user-specific). The `Write(redactions.yaml)` rule is needed because the `[a] Add replacements now` path in `/career:resume` appends to the file.
 
 9. **Offer to set up daily journal generation.**
    - The AI journal is most useful when it runs automatically at the end of each day.
